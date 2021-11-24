@@ -361,6 +361,52 @@ def viz_textbb(fignum,text_im, bb_list,alpha=1.0):
     plt.gca().set_ylim([H-1,0])
     plt.show(block=False)
 
+def nice_homography(H):
+    def _homographyBB(bbs, H, offset=None):
+        """
+        Apply homography transform to bounding-boxes.
+        BBS: 2 x 4 x n matrix  (2 coordinates, 4 points, n bbs).
+        Returns the transformed 2x4xn bb-array.
+
+        offset : a 2-tuple (dx,dy), added to points before transfomation.
+        """
+        eps = 1e-16
+        # check the shape of the BB array:
+        t,f,n = bbs.shape
+        assert (t==2) and (f==4)
+
+        # append 1 for homogenous coordinates:
+        bbs_h = np.reshape(np.r_[bbs, np.ones((1,4,n))], (3,4*n), order='F')
+        if offset != None:
+            bbs_h[:2,:] += np.array(offset)[:,None]
+
+        # perpective:
+        bbs_h = H.dot(bbs_h)
+        bbs_h /= (bbs_h[2,:]+eps)
+
+        bbs_h = np.reshape(bbs_h, (3,4,n), order='F')
+        return bbs_h[:2,:,:]
+
+    # Construct a bb0 (2x4x1), and transform it to bb. Just check the points order of bb0 and bb.
+    wordBB0 = np.array([[1,10,10,1], [10,10,20,20]]).reshape((2,4,1))
+    wordBB = _homographyBB(wordBB0.copy(), H)
+    wordBB0 = wordBB0[:,:,0]
+    wordBB = wordBB[:,:,0]
+    vec00 = wordBB0[:,3] - wordBB0[:,0]
+    vec01 = wordBB0[:,2] - wordBB0[:,1]
+    vec02 = wordBB0[:,1] - wordBB0[:,0]
+    vec03 = wordBB0[:,2] - wordBB0[:,3]
+    vec10 = wordBB[:,3] - wordBB[:,0]
+    vec11 = wordBB[:,2] - wordBB[:,1]
+    vec12 = wordBB[:,1] - wordBB[:,0]
+    vec13 = wordBB[:,2] - wordBB[:,3]
+    # I just check the vectors of corresponding pairs whether have the same orientation.
+    if np.dot(vec00, vec10) < 0 or np.dot(vec01, vec11) < 0 or np.dot(vec02, vec12) < 0 or np.dot(vec03, vec13) < 0:
+        clockwise = False
+    else:
+        clockwise = True
+    return clockwise
+
 class RendererV3(object):
 
     def __init__(self, data_dir, max_time=None):
@@ -391,10 +437,11 @@ class RendererV3(object):
             res = get_text_placement_mask(xyz,seg==l,regions['coeff'][idx],pad=2)
             if res is not None:
                 mask,H,Hinv = res
-                masks.append(mask)
-                Hs.append(H)
-                Hinvs.append(Hinv)
-                filt[idx] = True
+                if nice_homography(Hinv):
+                    masks.append(mask)
+                    Hs.append(H)
+                    Hinvs.append(Hinv)
+                    filt[idx] = True
         regions = self.filter_regions(regions,filt)
         regions['place_mask'] = masks
         regions['homography'] = Hs
